@@ -1,0 +1,260 @@
+---
+title: "Projet_stat_IODAA"
+authors: "Anne-Cécile TOULEMONDE,Nora PICAUT,Noémie JACQUET"
+date: "2023-01-20"
+output:
+  beamer_presentation: default
+  powerpoint_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Préparartion de l'espace de travail 
+
+#### Espace de  travail 
+```{r}
+setwd("~/IODAA/Cours_IODAA/STAT-GRANDE-DIM/PROJET/Data")
+```
+
+#### Installation des packages 
+
+```{r}
+install.packages("contrib.url")
+install.packages("FactoMinerR")
+install.packages("corrplot")
+install.packages("factoextra")
+install.packages("VIM")
+```
+
+```{r cars}
+library(readr)
+library(tidyverse)
+library(corrplot)
+library(FactoMineR)
+library(factoextra)
+library(ggplot2)
+library("VIM")
+library(glmnet)
+library
+```
+
+#### Importation des données 
+
+```{r pressure, echo=FALSE}
+df = read.csv2("Table_proteome_CD_all.csv")
+```
+
+## Objectifs du projet
+Etude de l'influence de la température et du stade d'imbibition sur la capacité germinative des graines à l'aide de données de protéomique pour des graines ayant subi un vieillissement artificiel immédiat (CD_0d).
+
+**Descripteurs:** 
+- température (variable qualitative à 3 modalités : *Low*, *Medium* et *Elevated*
+- stade d'imbibition (variable qualitative à 3 modalités :*DS* , *EI* , *LI*
+
+**Variable à prédire** : (variable qualitative) Capacité germinative des graines à l'aide de données de protéomique
+pour des graines ayant subi un vieillissement artificiel immédiat (CD_0d).
+
+## Analyse descriptive 
+### Nombre de lignes et colonnes 
+```{r}
+dim(df)
+```
+
+### Apercu du jeu de données 
+```{r}
+head(df)
+```
+#### Liste des variables 
+```{r}
+names(df) # Liste des variables 
+```
+#### Type des variables 
+
+```{r}
+str(df) ## Type de colonnes 
+```
+
+#### Dispersion des variables 
+Informations descriptives 
+```{r}
+#summary(df) 
+```
+
+### Anlayse des corrélations (variables quantitatives)
+Matrice de corrélation à partor de la 7eme colonne du dataset 
+```{r}
+library(corrplot)
+df1= df[,7:length(df)] ##On
+corrplot(cor(df1))
+```
+
+### Analyse à composantes principales
+### ACP 
+
+```{r}
+#res.pca = PCA(df1,graph = FALSE)
+#get_eigenvalue(res.pca)
+#fviz_pca_var(res.pca,axes=1:2)
+#fviz_pca_ind(res.pca,axes=1:2)
+#fviz_pca_var(res.pca, axes = c(1:3))
+```
+
+
+#### Prétraitement 
+Nombre de valeurs manquantes 
+```{r}
+res = summary(aggr(df,sortVar = TRUE))$group
+matrixplot(df,sortby = 2 )
+```
+Il n'y a pas de valeurs manquantes dans ce jeu de données. 
+
+#### QUESTION 4 - régression logistique 
+```{r}
+data_rlog = data.frame(tre = df$treatment,tem = df$temperature,imn = df$imbibition)
+
+X_encoded <- model.matrix(data_rlog,tre)
+Y = data_rlog$tre
+
+rlog <- glm(Y~.,data = data_rlog,family ="binomial")
+
+summary(rlog) ## beaucoup de NA a cause d'un probleme en grandes dimensions.$
+```
+
+
+### QUESTION 4.2 - Tableau pour ANOVA 1 facteur (temperature) 
+```{r}
+install.packages("MultiVarSel")
+library(MultiVarSel)
+df2 = df[df$treatment=="CD_0d", c(4,7:length(df))]
+head(df2)
+X_df2=df2["temperature"]
+Temp=X_df2$temperature
+Y_2=df2[,2:length(df2)]
+Y_2 <- scale(Y_2)
+X_2=model.matrix(~ Temp + 0)
+head(X_2)
+head(Y_2)
+E_hat <- residuals(lm(as.matrix(Y_2) ~ X_2 +0))
+whitening_test(E_hat)
+
+whitening_choice(E_hat, c("AR1", "noparam", "ARMA"), pAR=1, qMA=1)
+```
+### QUESTION 4.3 - Tableau pour ANOVA 1 facteur (imbibition) 
+```{r}
+df3 = df[df$treatment=="CD_0d", c(5,7:length(df))]
+head(df3)
+X_df3=df3["imbibition"]
+Imb=X_df3$imbibition   
+Y_3=df3[,2:length(df3)]
+Y_3 <- scale(Y_3)
+X_3=model.matrix(~ Imb + 0)
+head(X_3)
+head(Y_3)
+E_hat <- residuals(lm(as.matrix(Y_3) ~ X_3 +0))
+whitening_test(E_hat)
+
+whitening_choice(E_hat, c("AR1", "noparam", "ARMA"), pAR=1, qMA=1)
+```
+
+### QUESTION 4.4 - Tableau pour ANOVA 2 facteurs (temperature et imbibition) 
+```{r}
+df4 = df[df$treatment=="CD_0d", c(4,5,7:length(df))]
+head(df4)
+X_df4=df4[c(1,2)]
+head(X_df4)
+Imb=X_df4$imbibition   
+Temp=Imb=X_df4$temperature 
+Y_4=df4[,3:length(df4)]
+Y_4 <- scale(Y_4)
+X_4=model.matrix(~ Temp + Imb +0)
+head(X_4)
+head(Y_4)
+E_hat <- residuals(lm(as.matrix(Y_4) ~ X_4 +0))
+whitening_test(E_hat)
+
+whitening_choice(E_hat, c("AR1", "noparam", "ARMA"), pAR=1, qMA=1)
+```
+
+### Question 5 - apply LASS0=O glmet pour faire de la selection de variables 
+```{r}
+install.packages("glmnet")
+library("glmnet")
+```
+
+```{r}
+X= as.matrix(donnees_7_18[,2:ncol(donnees_7_18)])
+Y= as.numeric(donnees_7_18[,1])
+```
+
+### Méthode par cross-validation
+
+```{r}
+cv_glmnet=cv.glmnet(x=X,y=Y,family="gaussian")
+lambda_cv=cv_glmnet$lambda.min
+glmnet_17_18=glmnet(x=X,y=Y,family="gaussian",lambda=lambda_cv)
+beta_est_17_18=glmnet_17_18$beta
+intercept_17_18=glmnet_17_18$a0
+
+### Variables sélectionnées
+colnames(X)[which(beta_est_17_18!=0)]
+beta_est_17_18[which(beta_est_17_18!=0)]
+```
+
+Pour avoir des estimateurs fiables des estimateurs selectionnées: selectionne les varaibles issues de lasso et on refait un modèle linéare standard pour ne plus avoir d'estimateurs biaisés .
+
+```{r}
+##### Lambda 1se
+lambda_1se=cv_glmnet$lambda.1se
+glmnet_17_18_se=glmnet(x=X,y=Y,family="gaussian",lambda=lambda_1se)
+beta_est_17_18_se=glmnet_17_18_se$beta
+intercept_17_18_se=glmnet_17_18_se$a0
+
+### Variables sélectionnées
+colnames(X)[which(beta_est_17_18_se!=0)]
+beta_est_17_18_se[which(beta_est_17_18_se!=0)]
+```
+
+### Méthode par stability selection (ne tourne pas sur windows)
+Autre méthode pour choisir lambda afin d'obtenir le meilleur extimateur beta
+
+Choisir ds variables qui font au fur et à mesure des resampling
+
+--------- 
+inataquable = prenre les X de design : prendre un vefeur de coeficient beat et metttre des sprase dedans. 
+generer ds valeurs gauusiennes 
+
+SI lasso retrouve les beta données dnas le modole = conditions dirr retrouvée et donc LASSO est retrouvée.
+
+LASSO = s'applique bien glmnet = faire du LASSO du modele general generalise + logistique regression! très bien. Applquée la méthode de ce mec. glmnet lasso
+Fixe nps betas  = 
+
+```{r}
+###### Stability selection
+n=length(Y)
+p=dim(X)[2]
+nb_cores=4
+nb_repli=1000
+
+library(parallel)
+
+stabsel.glmnet <- function(i) 
+{
+  cat("+")
+  b_sort <- sort(sample(1:n,floor(n/2)))
+  resultat_glmnet=glmnet(X[b_sort,],Y[b_sort],family="gaussian",alpha=1)
+  nb_colonnes=dim(resultat_glmnet$beta)[2]
+  ind_glmnet=which(resultat_glmnet$beta[,nb_colonnes]!=0)
+  return(tabulate(ind_glmnet,p))
+}
+res.cum <- Reduce("+", mclapply(1:nb_repli, stabsel.glmnet, mc.cores=nb_cores))
+
+freq=res.cum/nb_repli
+sort(freq,decreasing=TRUE)
+
+ind_glmnet=which(freq>0.5)
+print(freq[ind_glmnet])
+
+colnames(X)[ind_glmnet]
+```
