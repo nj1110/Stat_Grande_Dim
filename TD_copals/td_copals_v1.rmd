@@ -1,0 +1,171 @@
+---
+title: "Projet_stat_IODAA"
+authors: "Anne-Cécile TOULEMONDE,Nora PICAUT,Noémie JACQUET"
+date: "2023-01-20"
+output:
+  beamer_presentation: default
+  powerpoint_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Préparartion de l'espace de travail 
+
+#### Espace de  travail 
+```{r}
+setwd("~/IODAA/Cours_IODAA/STAT-GRANDE-DIM/TD_5")
+```
+
+#### Installation des packages 
+
+```{r}
+install.packages("contrib.url")
+install.packages("FactoMinerR")
+install.packages("corrplot")
+install.packages("factoextra")
+install.packages("VIM")
+```
+
+```{r}
+library(readr)
+library("MultiVarSel")
+```
+
+#### Importation des données 
+
+```{r pressure, echo=FALSE}
+data("copals_camera")
+dim(copals_camera)
+str(copals_camera)
+copals = copals_camera[copals_camera$Include == 1, -1]
+str(copals)
+```
+
+```{r pressure, echo=FALSE}
+Y <- as.matrix(copals[, -(1:2)])
+X1 <- copals[, 1]
+X2 <- copals[, 2]
+
+rm <- which(X1 %in% c("1155","1551"))
+Y <- Y[-rm, ]
+X1 <- X1[-rm]; X1 <- factor(as.character(X1))
+X2 <- X2[-rm]; X2 <- factor(as.character(X2))
+```
+
+#### Y=XB+E
+####analyse descriptive on peut faire une heatmap des metabolites pour voir si corrélé entre eux, justement on verra rien meme en acp etc d'ou la necessité de faire de la selection de variables. Plus c'est rouge plus il y a de corrélation: groupe ede métabolites corrélés entre eux mais comme on a 1000 (le bloc rouge)  => FAIRE HEATMAP ET ACP IL FAUT MONTER JUSQU A 6 AXES POUR AVOIR X% DE LM   PAS TR7S INTERPRETABLE AU VU DES METABOLITES DONC ON DOIT FAIRE DE LA SELECTION DE VARIABLES
+####p nombre de colonnes matrice de design (p=3), n nombre de lignes de X-(30 arbres), q nombre de colonne de Y2 (1019 metabolites)
+###matrice des paramètres (3*1019)
+
+```{r pressure, echo=FALSE}
+X <- model.matrix(lm(Y ~ X2 + 0))
+p <- ncol(X)
+n=nrow(X)
+head(X)
+q=dim(Y)[2]
+q
+```
+
+
+```{r pressure, echo=FALSE}
+X <- model.matrix(lm(Y ~ X2 + 0))
+p <- ncol(X)
+n=nrow(X)
+head(X)
+q=dim(Y)[2]
+q
+```
+
+###Scale(centrer réduire, même utile pour ACP)
+
+```{r pressure, echo=FALSE}
+Yscaled=scale(Y)
+Y=Yscaled
+head(Y)
+```
+```{r pressure, echo=FALSE}
+heatmap(abs(cor(copals[,c(1,2)])))
+```
+
+###voir si les colonnes de Y sont indépendantes => estimer les résidus Ei chapeau
+### pour estimer les Ei chapeaux, modèle linéaire classique 
+###R vectorise tout seul et fait colonne par colonnes les considère de façon indépendante
+###fonction residuals
+### le -1 est pour enlever l'intercept ??? les EI chapeau sont un bruit blanc contre les EI chapeuax ne sont pas un bruit blanc => BB = variables centrées et esp de Eij Eil = 
+### test porte-manteau 
+```{r pressure, echo=FALSE}
+Y=Y[,1:200]
+n
+p
+q=dim(Y)[2]
+q
+residuals=lm(as.matrix(Y)~X-1)$residuals
+pvalue=whitening_test(residuals)
+pvalue
+```
+### on rejette H0 on a de la dépendance entre nos colonnes donc pas une bonne idée de faire lasso sur Y  vectorisé   on ne peut pas les mettre bout à bout pour avoir un vecteur pour appliquer lasso 
+### il faut blanchir la matrice et estimer le sigmaq -1/2 pour pouvoir blanchir les donnnes
+### puis après on a une matrice avec des colonnes indépendantes 
+### on peut faire lasso dessus 
+
+### pour blanchir les données : 3 facons de modéliser la dépendance et destomer le sigma chapeau et à chaque fois on refait le test du porte mantean; et on espère que 
+### cf. formules de la prof 
+### on a envie de vectoriser on considère un Ei tilde et on veut que ce soit du bruit blanc 
+### Ecrire ce qu'il a dans H0 et ce qu'on conclut 
+### On a trop de parametres à estimer B sa dimension c'est 3x1019
+### dans les whitening test (cf le détail), ACF : calcule les autocorrélations test khi 2 et renvoie stat de test on l'applique à chaque ligne (on va pas travailler avec np valeurs). une somme de loi de khi2 suit loi khi2 cf le cours 
+
+```{r pressure, echo=FALSE}
+result=whitening_choice(residuals,c("AR1","nonparam","ARMA"),pAR=1,qMA=1)
+result
+```
+### que fait le whitening choice: cf le code: on stocke sigma chapeau moins 1/2 c'est
+### sur les E tilde on fait le whiening test et on stocke la p value et on fait ca sur  chaque type de dépendance. On choisit non param ou arma les 2 p-values sont grandes, arma avantage nous donne une interprétation. Ici metabolites on se sait pas trop on predn nonparma
+###jouer avec les AR ??? (AR 3 1)?? PAS COMPRIS
+
+###etape de blanchiment: 
+###récupérer les sigma chapeau grace à la fonction whitening: on le stocke juste le sigma ### chapeau ici avec whitening (XXX) ci dessous
+###nb_repli: nbre de réplicat pour stability selection 
+
+### nom du package : nom de fonction 
+```{r pressure, echo=FALSE}
+square_root_inv_hat_Sigma=whitening(residuals,"nonparam",pAR=1,qMA=0)
+Frequencies=variable_selection(Y,X,square_root_inv_hat_Sigma,nb_repli=100,parallel=FALSE)
+head(Frequencies)
+```
+
+### On a tout pour blanchir les données comme colonne indépendantesn on peut les mettre ###les unes sous les aurres = vectoriser  quand on vectorise Y ronde=XB+E (vectorisé, Y ###rond = vec(Y) il devient de taille vq, B ronde de taille pq), puis  lasso pus il faut ###connaitre les formules avec khronecker etc     et il faut connaitre les tailles.
+###alpha = 1 lasso, si 0 rigde, si 
+###on recupère lamda qui minimise CV 
+###puis stability selection 
+###on prend vecteur de taile nq et on le coupe en 2 nq/2 observations, on stocke le indices, on lance glmnet avec lasso et lambad de CV on stocke les beta différents de zero
+
+###=> la fonction variable_selection fait tout ça 
+
+### quand on ça : il faut choisir un seuil ou beta selectionné à chaque dois 
+### faire le boulier aussi en plus  :pas mal à la ourest deux en classe 
+### la conclusion c'est que dans certaines localités le signal des métabolites n'est pas significatif 
+
+
+###boxplots des intensités des métabolites en fonction des conditions : ###analyse descriptive a posteriori
+
+
+```{r pressure, echo=FALSE}
+colnames(Frequencies)<-c('Names_of_Y','Names_of_X','frequency')
+# Here we can consider the names of Y as numerical since they correspond
+# to the ratio m/z of the metabolites.
+Frequencies$Names_of_X<-sub('X2','',Frequencies$Names_of_X)
+Frequencies$Names_of_Y<-as.numeric(gsub('X','',gsub('\\.1$','',Frequencies$Names_of_Y)))
+p<-ggplot(data=Frequencies[Frequencies$frequency>=0.95,], aes(x=Names_of_Y,y=Names_of_X,color=frequency))+
+geom_tile(size=0.75)+scale_color_gradient2(midpoint=0.95,mid ='orange')+
+theme_bw()+ylab('Levels of X')+xlab('m/z')
+p
+```
+
+```{r pressure, echo=FALSE}
+p<-ggplot(data=Frequencies[Frequencies$frequency==1,], aes(x=Names_of_Y,y=Names_of_X,color=Names_of_X))+
+ geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')
+p
+```
