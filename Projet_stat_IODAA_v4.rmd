@@ -1,0 +1,173 @@
+---
+title: "Projet_stat_IODAA"
+authors: "Anne-Cécile TOULEMONDE,Nora PICAUT,Noémie JACQUET"
+date: "2023-01-20"
+output:
+  beamer_presentation: default
+  powerpoint_presentation: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Préparartion de l'espace de travail 
+
+#### Espace de  travail 
+```{r}
+setwd("~/IODAA/Cours_IODAA/STAT-GRANDE-DIM/PROJET/Data")
+```
+
+#### Installation des packages 
+
+```{r}
+install.packages("contrib.url")
+install.packages("FactoMinerR")
+install.packages("corrplot")
+install.packages("factoextra")
+install.packages("VIM")
+```
+
+```{r cars}
+library(readr)
+library(tidyverse)
+library(corrplot)
+library(FactoMineR)
+library(factoextra)
+library(ggplot2)
+library("VIM")
+library(glmnet)
+```
+
+#### Importation des données 
+
+```{r pressure, echo=FALSE}
+df = read.csv2("Table_proteome_CD_all.csv")
+```
+
+## Objectifs du projet
+Etude de l'influence de la température et du stade d'imbibition sur la capacité germinative des graines à l'aide de données de protéomique pour des graines ayant subi un vieillissement artificiel immédiat (CD_0d).
+
+**Descripteurs:** 
+- température (variable qualitative à 3 modalités : *Low*, *Medium* et *Elevated*
+- stade d'imbibition (variable qualitative à 3 modalités :*DS* , *EI* , *LI*
+
+**Variable à prédire** : (variable qualitative) Capacité germinative des graines à l'aide de données de protéomique
+pour des graines ayant subi un vieillissement artificiel immédiat (CD_0d).
+
+## Analyse descriptive 
+### Nombre de lignes et colonnes 
+```{r}
+dim(df)
+```
+
+### Apercu du jeu de données 
+```{r}
+head(df)
+```
+#### Liste des variables 
+```{r}
+names(df) # Liste des variables 
+```
+#### Type des variables 
+
+```{r}
+str(df) ## Type de colonnes 
+```
+
+#### Dispersion des variables 
+Informations descriptives 
+```{r}
+#summary(df) 
+```
+
+### Anlayse des corrélations (variables quantitatives)
+Matrice de corrélation à partor de la 7eme colonne du dataset 
+```{r}
+library(corrplot)
+df1= df[,7:length(df)] ##On
+corrplot(cor(df1))
+```
+
+### Analyse à composantes principales
+### ACP 
+
+```{r}
+#res.pca = PCA(df1,graph = FALSE)
+#get_eigenvalue(res.pca)
+#fviz_pca_var(res.pca,axes=1:2)
+#fviz_pca_ind(res.pca,axes=1:2)
+#fviz_pca_var(res.pca, axes = c(1:3))
+```
+
+
+#### Prétraitement 
+Nombre de valeurs manquantes 
+```{r}
+res = summary(aggr(df,sortVar = TRUE))$group
+matrixplot(df,sortby = 2 )
+```
+Il n'y a pas de valeurs manquantes dans ce jeu de données. 
+
+
+
+### QUESTION 4.1 - Tableau pour ANOVA 1 facteur (temperature) 
+```{r}
+install.packages("MultiVarSel")
+library(MultiVarSel)
+df2 = df[df$treatment=="CD_0d", c(4,7:length(df))]
+head(df2)
+X_df2=df2[, 1]
+X_df2 <- factor(as.character(X_df2))
+head(X_df2)
+Y_2 <- as.matrix(df2[,2:length(df2)])
+Y_2 <- scale(Y_2)
+X2 <- model.matrix(lm(Y_2 ~ X_df2 + 0))
+head(X2)
+head(Y_2)
+residuals=lm(as.matrix(Y_2)~X2-1)$residuals
+pvalue=whitening_test(residuals)
+pvalue
+
+```
+
+
+### QUESTION 4.2 - Tableau pour ANOVA 2 facteurs (temperature et imbibition) 
+```{r}
+df4 = df[df$treatment=="CD_0d", c(4,5,7:length(df))]
+head(df4)
+X1_df4=df4[, 1]
+X2_df4=df4[, 2]
+head(X1_df4)
+X1_df4 <- factor(as.character(X1_df4))
+X2_df4 <- factor(as.character(X2_df4))
+Y_4 <- as.matrix(df4[,3:length(df4)])
+Y_4 <- scale(Y_4)
+X4=model.matrix(lm(Y_4 ~ X1_df4 + X2_df4 + 0))
+head(X4)
+head(Y_4)
+residuals=lm(as.matrix(Y_4)~X4-1)$residuals
+pvalue=whitening_test(residuals)
+pvalue
+
+
+```
+
+### Question - Suite du TP
+```{r}
+#result=whitening_choice(residuals,c("AR1","nonparam","ARMA"),pAR=1,qMA=1)
+#result
+```
+
+```{r}
+```
+
+
+
+```{r}
+```
+
+
+
+```{r}
+```
