@@ -26,7 +26,7 @@ library(corrplot)
 library(FactoMineR)
 library(factoextra)
 library(ggplot2)
-library("VIM")
+library(VIM)
 library(glmnet)
 library(MultiVarSel)
 library(DescTools)
@@ -83,7 +83,6 @@ head(df1)
 corrplot(cor(df1))
 ```
 
-``
 
 ### Analyse à composantes principales 
 L'ACP n'est pas suffisante: il faut attendre le 5e axe pour expliquer 70% de la variance cumulée.PAS TRES INTERPRETABLE L'ACP sur les protéines donc on doit faire de la sélection de variable
@@ -112,7 +111,7 @@ heatmap(abs(cor(df1)), symm=TRUE)
 ```
 
 
-### QUESTION 2 - Analyse 
+# AVEC BLANCHIEMENT 
 
 ```{r}
 Analyse_prot_stat = function(df,white_model,frequency)
@@ -235,226 +234,137 @@ boulier
 ```
 
 # SANS BLANCHIEMENT 
-### Fonction 
-
+### Fonctions 
 ```{r}
-stabsel.glmnet <- function(i)
-  {
-    b_sort <- sort(sample(1:(n*q),floor((n*q)/2)))
-    resultat_glmnet=glmnet(Xvec[b_sort,],Yvec[b_sort],family="gaussian",alpha=1,lambda=lambda_min)
-    ind_glmnet=which(resultat_glmnet$beta!=0)
+Analyse_sans_blanchiement = function(df,X,Y, nb_repli)
+{
+
+  #input = 
+   # - X comme extrait de *df* comme df[,1]
+   # - Y en format matrice
+   # - datframe avec X et Y 
+   # -  nb_repli 
     
-    return(tabulate(ind_glmnet,(p*q)))
+  #output = graphiques : plot + boulier 
+ 
+  #Traitement
+  X<- factor(as.character(X))
+  Y<- scale(Y)
+  
+  #Matrice de design
+  mat <- model.matrix(lm(Y~ X+ 0))
+  p = ncol(mat)
+  n = nrow(mat)
+  q=dim(Y)[2]
+  
+  # ETude du modèle multivarié 
+  Yscaled = scale(Y)
+  Yvec=as.numeric(Yscaled)
+  length(Yvec)
+  
+  # Vectorisation
+  Xvec=kronecker(diag(q),mat)
+  
+  # Cross validation 
+  resultat_cv=cv.glmnet(Xvec,Yvec,nfolds=10,family="gaussian",alpha=1,grouped=FALSE)
+  lambda_min=resultat_cv_imb$lambda.min
+  
+  #Stability Selection (it may take time)
+ 
+  stabsel.glmnet <- function(i) 
+    {
+      b_sort <- sort(sample(1:(n*q),floor((n*q)/2)))
+      resultat_glmnet=glmnet(Xvec[b_sort,],Yvec[b_sort],family="gaussian",alpha=1,lambda=lambda_min)
+      ind_glmnet=which(resultat_glmnet$beta!=0)
+      return(tabulate(ind_glmnet,(p*q)))
+    }
+  
+  res.cum <- Reduce("+", lapply(1:nb_repli, stabsel.glmnet))
+  
+  #Variable selection (threshold = 1 to control the false positive rate)
+  ind=which((res.cum/nb_repli)==1)
+  length(ind) # beaucoup trop 
+  length(res.cum)
+  
+  return(list(res.cum))
 }
 ```
 
+# Temperature sans blanchiement 
 
 ```{r}
-df_sb_temp= df[df$treatment=="CD_0d", c(4,7:length(df))]
-df_sb_im= df[df$treatment=="CD_0d", c(5,7:length(df))]
-rownames(df_sb_temp) <- NULL
-rownames(df_sb_im) <- NULL
-
-# matrice de design 
-X_sb_temp = factor(as.character(df_sb_temp[,1]))
-X_sb_im = factor(as.character(df_sb_im[,1]))
-table(X_sb_temp,X_sb_im)
-
-# normalise les données d'abondance des protéines
-Y_sb = as.matrix(df_temp[,2:length(df_sb_temp)])
-Y_sb = scale(Y_sb)
-dim(Y_sb)
-#mat_temp <- model.matrix(lm(Y_temp~ X_temp+ 0))
-
-## Modèles
-model_sb_im =  model.matrix(lm(Y_sb ~ X_sb_im+0))
-model_sb_temp =  model.matrix(lm(Y_sb ~ X_sb_temp+0))
-
-# dimensions 
-n = dim(Y_sb)[1]
-p = dim(X_sb_im)[2]
-q = dim(Y_sb)[2]
-
-# vectoriser imbibition
-Yvec=as.numeric(Y_sb)
-Xvec_sb_imb=kronecker(diag(q),model_sb_im)
-dim(Xvec_sb_imb)
-
-# resultats
-resultat_cv=cv.glmnet(Xvec_sb_imb,Yvec,nfolds=10,family="gaussian",alpha=1,grouped=T)
-lambda_min=resultat_cv$lambda.min
-
-res.cum <- Reduce("+", lapply(1:nb_repli, stabsel.glmnet))
-
-nb_repli=100
-result <- replicate(nb_repli, stabsel.glmnet(i))
-#dim(result)
-ind=which((res.cum/nb_repli)==1)
-#print(length(ind),length(res.cum))
-
-prot<- rep(names(df_cd0_1), each = 3)
-modalites_temp <- rep(c(df_sb_temp$temperature), times = 260)
-modalites_im <- rep(c(df_sb_im$imbibition), times = 260)
-
-b = cbind(as.data.frame(res.cum), prot, modalites_temp)
-b <- b[ind, ]
-table(b$modalites)
-```
-
-```{r}
-pdf("plot_im.pdf") 
-ggplot(data=b, aes(x=prot,y=modalites_im,color=modalites_im))+
-geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
-theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
-dev.off() 
-```
-# tempétarture
-sur les 45 prot qui sont le plus influencées par la temperature, on peut dire que les prot sont plus abondantes (s'expriment plus) pour les tempratures elevées ou bien faibles. Les prot s'expriment peu pour les températures medium.
-
-# imbibition
-il reste 253 prot ce qui est bcp et rend l'interprétation difficile. On peut dire qu'il n'y a pas de 
-
-#------------------------------------------------
-#-------------------------------------------------
-
-```{r}
+df = read.csv2("Table_proteome_CD_all.csv")
 df_temp= df[df$treatment=="CD_0d", c(4,7:length(df))]
-X_temp <- df[,1]
+rownames(df_temp) <- NULL
+Y<- as.matrix(df_temp[,2:length(df_temp)])
+X = df_temp[,1]
 
-Y_sb = as.matrix(df_temp[,2:length(df_temp)])
-Y_sb = scale(Y_sb)
-dim(Y_sb)
-
-#créer la matrice design*
-model <- model.matrix(lm(Y_sb ~ X_temp+0))
-dim(model)
-print(model)
+Analyse_sans_blanchiement(df,X,Y, 50)
 ```
-
-# normalise les données d'abondance des protéines
-
 ```{r}
-df_sb_temp= df[df$treatment=="CD_0d", c(4,7:length(df))]
-rownames(df_sb_temp) <- NULL
-X_sb_temp = factor(as.character(df_sb_temp[,1]))
-
-```
-
-```{r}
-Yscaled = scale(Y)
-Y = Yscaled
-dim(Y)
-n = dim(Y)[1]
-p = dim(X)[2]
-q = dim(Y)[2]
-```
-
-
-##############################################################################################
-## Sans blanchiment
-# sans selection de variables
-#temperature
-```{r}
-Y <- as.matrix(df_cd0_1)
-X_temp <- df_cd0[,4]
-X_in <- df_cd0[,5]
-```
-
-
-```{r}
-table(X_temp,X_in)
-dim(Y)
-```
-
-# normalise les données d'abondance des protéines
-```{r}
-Yscaled = scale(Y)
-Y = Yscaled
-dim(Y)
-```
-
-
-```{r}
-X <- model.matrix(lm(Y ~ X_in+0))
-```
-
-
-```{r}
-n = dim(Y)[1]
-p = dim(X)[2]
-q = dim(Y)[2]
-```
-# vectoriser
-```{r}
-dim(Y)
-Yvec=as.numeric(Y)
-Xvec=kronecker(diag(q),X)
-length(Yvec)
-```
-
-```{r}
-dim(Xvec)
-```
-
-```{r}
-resultat_cv=cv.glmnet(Xvec,Yvec,nfolds=10,family="gaussian",alpha=1,grouped=T)
-lambda_min=resultat_cv$lambda.min
-```
-
-```{r}
-nb_repli=50
-stabsel.glmnet <- function(i) {
-b_sort <- sort(sample(1:(n*q),floor((n*q)/2)))
-resultat_glmnet=glmnet(Xvec[b_sort,],Yvec[b_sort],family="gaussian",alpha=1,lambda=lambda_min)
-ind_glmnet=which(resultat_glmnet$beta!=0)
-return(tabulate(ind_glmnet,(p*q)))}
-res.cum <- Reduce("+", lapply(1:nb_repli, stabsel.glmnet))
-```
-
-
-```{r}
-result <- replicate(nb_repli, stabsel.glmnet(i))
-dim(result)
-```
-
-```{r}
-ind=which((res.cum/nb_repli)==1)
-length(ind)
-length(res.cum)
-```
-
-
-```{r}
+df_cd0 = df[df$treatment == 'CD_0d', -6]
+df_cd0_1 = df_cd0[,6:length(df_cd0)]
 prot<- rep(names(df_cd0_1), each = 3)
-modalites_temp <- rep(c(df_cd0$temperature), times = 260)
-modalites_im <- rep(c(df_cd0$imbibition), times = 260)
-```
+modalites <- rep(c(df_cd0[,1]), times = 260)
 
-```{r}
-b = cbind(as.data.frame(res.cum), prot, modalites_temp)
-b <- b[ind, ]
-table(b$modalites)
-```
+b_temp = cbind(as.data.frame(res.cum), prot, modalites_temp)
+b_temp = b[ind, ]
+table(b_temp$modalites)
 
-```{r}
-pdf("p_im.pdf") 
-ggplot(data=b, aes(x=prot,y=modalites_im,color=modalites_im))+
+ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
 geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
 theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
-dev.off() 
+
 ```
-# tempétarture
-sur les 45 prot qui sont le plus influencées par la temperature, on peut dire que les prot sont plus abondantes (s'expriment plus) pour les tempratures elevées ou bien faibles. Les prot s'expriment peu pour les températures medium.
+# Imbibition sans blanchiement 
+```{r}
+df_imb= df[df$treatment=="CD_0d", c(5,7:length(df))]
+rownames(df_imb) <- NULL
+Y_imb<- as.matrix(df_temp[,2:length(df_imb)])
+X_imb <- factor(as.character(df_imb[,1]))
 
-# imbibition
-il reste 253 prot ce qui est bcp et rend l'interprétation difficile. On peut dire qu'il n'y a pas de 
+# Usage de la fonction 
+Analyse_sans_blanchiement(df,X_imb,Y_imb, 50)
+```
+```{r}
+df_cd0 = df[df$treatment == 'CD_0d', -6]
+df_cd0_1 = df_cd0[,6:length(df_cd0)]
+prot<- rep(names(df_cd0_1), each = 6)
+modalites <- rep(c(df_cd0[,1]), times = 260)
 
+b_temp = cbind(as.data.frame(res.cum), prot, modalites_temp)
+b_temp = b[ind, ]
+table(b_temp$modalites)
 
+ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
+geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
 
+### ANOVA 2 facteurs (températures et imbibition SANS blanchiement et SANS interaction)
+```{r}
+# df deja pret dans la partie avec interaction 
+X_2fac_sans_interac_SB <- df_2fac_sans_inter[,1]
+Y__2fac_sans_interac_SB <- as.matrix(df_2fac_sans_inter[,2:length(df_2fac_sans_inter)])
 
+Analyse_sans_blanchiement(df_2fac_sans_inter,X_2fac_sans_interac_SB,Y__2fac_sans_interac_SB, 50)
+```
 
+######################################################################
+PB pour adapter 
+```{r}
+#df_cd0 = df[df$treatment == 'CD_0d', -6]
+#df_cd0_1 = df_cd0[,6:length(df_cd0)]
+#prot<- rep(names(df_cd0_1), each = 3)
+prot<- rep(names(df_2fac_sans_inter[,-1]), each = 6)
+modalites_2fac_sans_interac_SB <- rep(c(df_2fac_sans_inter[,1]), times = 260)
 
+b_temp = cbind(as.data.frame(res.cum), prot, modalites_2fac_sans_interac_SB)
+b_temp = b[ind, ]
+table(b_temp$modalites_2fac_sans_interac_SB)
 
-
-
+ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
+geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
 
