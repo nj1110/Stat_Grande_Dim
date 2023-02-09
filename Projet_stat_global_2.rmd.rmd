@@ -143,11 +143,17 @@ Analyse_prot_stat = function(df,white_model,frequency)
   # Selection des variables
   Frequencies=variable_selection(Y,mat_temp,square_root_inv_hat_Sigma,nb_repli=100,parallel=FALSE)
   
+  # Liste intersection 
+  Names_Frequency = data.frame(Frequencies)
+  colnames(Names_Frequency)<-c('Names_of_Y','Names_of_X','frequency')
+  Names_Frequency$Names_of_X<-sub('X_df2', '',Frequencies$Names_of_X)
+  Names_Frequency$Names_of_Y<-Frequencies$Names_of_Y
+ 
+  
   # Graphiques:
   colnames(Frequencies)<-c('Names_of_Y','Names_of_X','frequency')
   Frequencies$Names_of_X<-sub('X_df2', '',Frequencies$Names_of_X)
   Frequencies$Names_of_Y<-as.numeric(StrRight(gsub('p_AT','',gsub('\\.1$','',Frequencies$Names_of_Y)), 5))
-  
   
   plot_blanch<-ggplot(data=Frequencies[Frequencies$frequency>=0.95,], aes(x=Names_of_Y,y=Names_of_X,color=frequency))+
     geom_tile(size=0.75)+
@@ -157,9 +163,7 @@ Analyse_prot_stat = function(df,white_model,frequency)
   boulier_blanch<-ggplot(data=Frequencies[Frequencies$frequency==frequency,], aes(x=Names_of_Y,y=Names_of_X,color=Names_of_X))+
   geom_point(size=3)+theme_bw()+ylab('Levels of X')+xlab('m/z')
   boulier_blanch<-boulier_blanch + theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14),legend.position="bottom")
-  
-plot_blanch<-plot_blanch + theme(plot.width=10, plot.height=15)
-boulier_blanch<-boulier_blanch + theme(plot.width=10, plot.height=15)
+
   
   return(list(sprintf("Test du Portemeanteau: pvalue = %s",round(pval_temp,2)),sprintf("Le nombre de lignes est %i et le nombre de    colonnes %i",nrow(mat_temp),ncol(mat_temp)),sprintf("les dimensions de la matrice du modèle sont %i",dim(mat_temp)[2]),boulier_blanch,plot_blanch))
 }
