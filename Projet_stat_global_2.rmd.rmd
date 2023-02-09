@@ -1,0 +1,374 @@
+---
+title: "Multivarsel_fonction"
+author: "Anne-Cécile TOULEMONDE"
+date: "2023-02-07"
+output: pdf_document
+---
+
+## Préparartion de l'espace de travail 
+
+#### Installation des packages 
+
+```{r}
+install.packages("contrib.url")
+install.packages("FactoMinerR")
+install.packages("corrplot")
+install.packages("factoextra")
+install.packages("VIM")
+install.packages("MultiVarSel")
+install.packages("DescTools")
+```
+
+```{r cars}
+library(readr)
+library(tidyverse)
+library(corrplot)
+library(FactoMineR)
+library(factoextra)
+library(ggplot2)
+library(VIM)
+library(glmnet)
+library(MultiVarSel)
+library(DescTools)
+```
+
+#### Importation des données 
+```{r}
+setwd("C:/Users/actou/OneDrive/Documents/IODAA/Statistiques")
+```
+
+```{r pressure, echo=FALSE}
+df = read.csv2("Table_proteome_CD_all.csv")
+```
+
+## Objectifs du projet
+Etude de l'influence de la température et du stade d'imbibition sur la capacité germinative des graines à l'aide de données de protéomique pour des graines ayant subi un vieillissement artificiel immédiat (CD_0d).
+
+**Descripteurs:** 
+- température (variable qualitative à 3 modalités : *Low*, *Medium* et *Elevated*
+- stade d'imbibition (variable qualitative à 3 modalités :*DS* , *EI* , *LI*
+
+**Variable à prédire** : (variable qualitative) Capacité germinative des graines à l'aide de données de protéomique
+pour des graines ayant subi un vieillissement artificiel immédiat (CD_0d).
+
+## QUESTION 1 Analyse descriptive 
+### Nombre de lignes et colonnes 
+```{r}
+dim(df)
+```
+```{r}
+head(df)
+```
+```{r}
+names(df[1:10]) # Liste des variables 
+```
+#### Type des variables 
+
+```{r}
+str(df[1:10]) ## Type de colonnes 
+```
+
+#### Dispersion des variables 
+Informations descriptives 
+```{r}
+#summary(df) 
+```
+
+### Anlayse des corrélations (variables quantitatives)
+Matrice de corrélation à partor de la 7eme colonne du dataset 
+```{r}
+library(corrplot)
+df1=df[df$treatment=="CD_0d", c(7:length(df))]
+head(df1)
+corrplot(cor(df1))
+```
+
+
+### Analyse à composantes principales 
+L'ACP n'est pas suffisante: il faut attendre le 5e axe pour expliquer 70% de la variance cumulée.PAS TRES INTERPRETABLE L'ACP sur les protéines donc on doit faire de la sélection de variable
+```{r}
+res.pca = PCA(df1,graph = FALSE)
+get_eigenvalue(res.pca)
+fviz_pca_var(res.pca,axes=1:2)
+fviz_pca_ind(res.pca,axes=1:2)
+fviz_pca_var(res.pca, axes = c(1:3))
+```
+
+
+#### Prétraitement 
+Nombre de valeurs manquantes 
+```{r}
+res = summary(aggr(df,sortVar = TRUE))$group
+matrixplot(df,sortby = 2 )
+```
+Il n'y a pas de valeurs manquantes dans ce jeu de données. 
+
+###  Analyse descriptive : HEATMAP de correlation entre les métabolites 
+Heatmap des protéines pour voir si corrélées entre elles, justement on verra rien meme en acp etc d'ou la necessité de faire de la selection de variables. Plus c'est rouge plus il y a de corrélation: groupe de protéines en bas à droite corrélées entre elles, mais il y en a bcp on doit aller plus loin et faire de la sélection de variables
+```{r}
+head(df1)
+heatmap(abs(cor(df1)), symm=TRUE)
+```
+
+
+# AVEC BLANCHIEMENT 
+
+```{r}
+Analyse_prot_stat = function(df,white_model,frequency)
+  {
+  ## Variables 
+  white_model = as.character(white_model)
+  
+  ## matrice de design 
+  rownames(df) <- NULL
+  X<- factor(as.character(df[,1]))
+  Y<- as.matrix(df_temp[,2:length(df)])
+  Y<- scale(Y)
+  mat_temp <- model.matrix(lm(Y~ X+ 0))
+  
+  ## Analyse des réisus et test du portemeanteau
+  residuals=lm(as.matrix(Y)~mat_temp-1)$residuals
+  pval_temp = whitening_test(residuals)
+  
+  sprintf("Test du Portemeanteau: pvalue = %s",round(pval_temp,2))
+  sprintf("Le nombre de lignes est %i et le nombre de colonnes %i",nrow(mat_temp),ncol(mat_temp))
+  sprintf("les dimensions de la matrice du modèle sont %i",dim(mat_temp)[2])
+  
+  result_blanchiement=whitening_choice(residuals,c("AR1","nonparam","ARMA"),pAR=1,qMA=1)
+  print(result_blanchiement) # selection du meilleur modèle pour repésenter la   dépendance des résidus 
+  
+  # Calcul estimateur de sigma 
+  square_root_inv_hat_Sigma=whitening(residuals,white_model,pAR=1,qMA=0)
+  
+  # Selection des variables
+  Frequencies=variable_selection(Y,mat_temp,square_root_inv_hat_Sigma,nb_repli=100,parallel=FALSE)
+  
+  # Graphiques:
+  colnames(Frequencies)<-c('Names_of_Y','Names_of_X','frequency')
+  Frequencies$Names_of_X<-sub('X_df2', '',Frequencies$Names_of_X)
+  Frequencies$Names_of_Y<-as.numeric(StrRight(gsub('p_AT','',gsub('\\.1$','',Frequencies$Names_of_Y)), 5))
+  
+  
+  plot_blanch<-ggplot(data=Frequencies[Frequencies$frequency>=0.95,], aes(x=Names_of_Y,y=Names_of_X,color=frequency))+
+    geom_tile(size=0.75)+
+    scale_color_gradient2(midpoint=0.95,mid ='orange')+ 
+    theme_bw()+ylab('Levels of X')+xlab('m/z')
+
+  boulier_blanch<-ggplot(data=Frequencies[Frequencies$frequency==frequency,], aes(x=Names_of_Y,y=Names_of_X,color=Names_of_X))+
+  geom_point(size=3)+theme_bw()+ylab('Levels of X')+xlab('m/z')
+  boulier_blanch<-boulier_blanch + theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14),legend.position="bottom")
+  
+plot_blanch<-plot_blanch + theme(plot.width=10, plot.height=15)
+boulier_blanch<-boulier_blanch + theme(plot.width=10, plot.height=15)
+  
+  return(list(sprintf("Test du Portemeanteau: pvalue = %s",round(pval_temp,2)),sprintf("Le nombre de lignes est %i et le nombre de    colonnes %i",nrow(mat_temp),ncol(mat_temp)),sprintf("les dimensions de la matrice du modèle sont %i",dim(mat_temp)[2]),boulier_blanch,plot_blanch))
+}
+```
+
+### ANOVA 1 Facteur avec blanchiment: Temperature 
+```{r}
+df_temp= df[df$treatment=="CD_0d", c(4,7:length(df))]
+Analyse_prot_stat(df_temp,"nonparam",1)
+```
+
+### ANOVA 1 Facteur avec blanchiement :Imbibition 
+```{r}
+df_imbib= df[df$treatment=="CD_0d", c(5,7:length(df))]
+Analyse_prot_stat(df_imbib,"AR1",1)
+```
+
+### ANOVA 2 facteurs (températures et imbibition AVEC blanchiement et SANS interaction)
+```{r}
+
+# Fusionner les deux colonnes tmperature et imbibition
+df_2fac_sans_inter= df[df$treatment=="CD_0d", c(4,5,7:length(df))]
+rownames(df_2fac_sans_inter) <- NULL
+
+df_2fac_sans_inter$temp_imb <-paste0(df_2fac_sans_inter$temperature, "_", df_2fac_sans_inter$imbibition)
+df_2fac_sans_inter$temperature <- NULL  
+df_2fac_sans_inter$imbibition <- NULL
+
+# Mettre la colonne tmp_imb en première colonne 
+library(dplyr)
+df_2fac_sans_inter %>% select(temp_imb, everything()) -> df_2fac_sans_inter
+
+# Appliquer la meme fonction 
+Analyse_prot_stat(df_2fac_sans_inter,"nonparam",0.9)
+```
+
+### ANOVA 2 facteurs (températures et imbibition) AVEC blanchiement et AVEC interactions)
+
+
+```{r}
+df_2fac_inter= df[df$treatment=="CD_0d", c(4,5,7:length(df))]
+rownames(df_2fac_inter) <- NULL
+
+X1_dfint<- factor(as.character(df_2fac_inter[, 1]))
+X2_dfint<- factor(as.character(df_2fac_inter[, 2]))
+Y_int <- as.matrix(df_2fac_inter[,3:length(df_2fac_inter)])
+Y_int <- scale(Y_int)
+Xint <- model.matrix(lm(Y_int~ (X1_dfint:X2_dfint) + 0))
+
+## Whitening test
+residuals=lm(as.matrix(Y_int)~Xint-1)$residuals
+pvalue = whitening_test(residuals)
+sprintf("pvalue %s",round(pvalue,2))
+result = whitening_choice(residuals,c("AR1","nonparam","ARMA"),pAR=1,qMA=1)
+result
+
+square_root_inv_hat_Sigma=whitening(residuals,"nonparam",pAR=1,qMA=0)
+Frequencies=variable_selection(Y_int,Xint,square_root_inv_hat_Sigma,nb_repli=100,parallel=FALSE)
+colnames(Frequencies)<-c('Names_of_Y','Names_of_X','frequency')
+Frequencies$Names_of_X<-sub('X1_dfint', '', sub('X2_dfint', '',Frequencies$Names_of_X))
+Frequencies$Names_of_Y<-as.numeric(StrRight(gsub('p_AT','',gsub('\\.1$','',Frequencies$Names_of_Y)), 5))
+
+## Graph
+plot<-ggplot(data=Frequencies[Frequencies$frequency>=0.95,], aes(x=Names_of_Y,y=Names_of_X,color=frequency))+
+geom_tile(size=0.75)+scale_color_gradient2(midpoint=0.95,mid ='orange')+
+geom_point(size=2) +
+theme_bw()+ylab('Levels of X')+xlab('ratio m/z of the metabolites.')
+data=Frequencies[Frequencies$frequency>=0.95,]
+plot
+
+boulier<-ggplot(data=Frequencies[Frequencies$frequency==1,], aes(x=Names_of_Y,y=Names_of_X,color=Names_of_X))+
+geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')
+boulier
+
+
+```
+
+# SANS BLANCHIEMENT 
+### Fonctions 
+```{r}
+Analyse_sans_blanchiement = function(df,X,Y, nb_repli)
+{
+
+  #input = 
+   # - X comme extrait de *df* comme df[,1]
+   # - Y en format matrice
+   # - datframe avec X et Y 
+   # -  nb_repli 
+    
+  #output = graphiques : plot + boulier 
+ 
+  #Traitement
+  X<- factor(as.character(X))
+  Y<- scale(Y)
+  
+  #Matrice de design
+  mat <- model.matrix(lm(Y~ X+ 0))
+  p = ncol(mat)
+  n = nrow(mat)
+  q=dim(Y)[2]
+  
+  # ETude du modèle multivarié 
+  Yscaled = scale(Y)
+  Yvec=as.numeric(Yscaled)
+  length(Yvec)
+  
+  # Vectorisation
+  Xvec=kronecker(diag(q),mat)
+  
+  # Cross validation 
+  resultat_cv=cv.glmnet(Xvec,Yvec,nfolds=10,family="gaussian",alpha=1,grouped=FALSE)
+  lambda_min=resultat_cv_imb$lambda.min
+  
+  #Stability Selection (it may take time)
+ 
+  stabsel.glmnet <- function(i) 
+    {
+      b_sort <- sort(sample(1:(n*q),floor((n*q)/2)))
+      resultat_glmnet=glmnet(Xvec[b_sort,],Yvec[b_sort],family="gaussian",alpha=1,lambda=lambda_min)
+      ind_glmnet=which(resultat_glmnet$beta!=0)
+      return(tabulate(ind_glmnet,(p*q)))
+    }
+  
+  res.cum <- Reduce("+", lapply(1:nb_repli, stabsel.glmnet))
+  
+  #Variable selection (threshold = 1 to control the false positive rate)
+  ind=which((res.cum/nb_repli)==1)
+  length(ind) # beaucoup trop 
+  length(res.cum)
+  
+  return(list(res.cum))
+}
+```
+
+# Temperature sans blanchiement 
+
+```{r}
+df = read.csv2("Table_proteome_CD_all.csv")
+df_temp= df[df$treatment=="CD_0d", c(4,7:length(df))]
+rownames(df_temp) <- NULL
+Y<- as.matrix(df_temp[,2:length(df_temp)])
+X = df_temp[,1]
+
+Analyse_sans_blanchiement(df,X,Y, 50)
+```
+```{r}
+df_cd0 = df[df$treatment == 'CD_0d', -6]
+df_cd0_1 = df_cd0[,6:length(df_cd0)]
+prot<- rep(names(df_cd0_1), each = 3)
+modalites <- rep(c(df_cd0[,1]), times = 260)
+
+b_temp = cbind(as.data.frame(res.cum), prot, modalites_temp)
+b_temp = b[ind, ]
+table(b_temp$modalites)
+
+ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
+geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+```
+# Imbibition sans blanchiement 
+```{r}
+df_imb= df[df$treatment=="CD_0d", c(5,7:length(df))]
+rownames(df_imb) <- NULL
+Y_imb<- as.matrix(df_temp[,2:length(df_imb)])
+X_imb <- factor(as.character(df_imb[,1]))
+
+# Usage de la fonction 
+Analyse_sans_blanchiement(df,X_imb,Y_imb, 50)
+```
+```{r}
+df_cd0 = df[df$treatment == 'CD_0d', -6]
+df_cd0_1 = df_cd0[,6:length(df_cd0)]
+prot<- rep(names(df_cd0_1), each = 6)
+modalites <- rep(c(df_cd0[,1]), times = 260)
+
+b_temp = cbind(as.data.frame(res.cum), prot, modalites_temp)
+b_temp = b[ind, ]
+table(b_temp$modalites)
+
+ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
+geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+### ANOVA 2 facteurs (températures et imbibition SANS blanchiement et SANS interaction)
+```{r}
+# df deja pret dans la partie avec interaction 
+X_2fac_sans_interac_SB <- df_2fac_sans_inter[,1]
+Y__2fac_sans_interac_SB <- as.matrix(df_2fac_sans_inter[,2:length(df_2fac_sans_inter)])
+
+Analyse_sans_blanchiement(df_2fac_sans_inter,X_2fac_sans_interac_SB,Y__2fac_sans_interac_SB, 50)
+```
+
+######################################################################
+PB pour adapter 
+```{r}
+#df_cd0 = df[df$treatment == 'CD_0d', -6]
+#df_cd0_1 = df_cd0[,6:length(df_cd0)]
+#prot<- rep(names(df_cd0_1), each = 3)
+prot<- rep(names(df_2fac_sans_inter[,-1]), each = 6)
+modalites_2fac_sans_interac_SB <- rep(c(df_2fac_sans_inter[,1]), times = 260)
+
+b_temp = cbind(as.data.frame(res.cum), prot, modalites_2fac_sans_interac_SB)
+b_temp = b[ind, ]
+table(b_temp$modalites_2fac_sans_interac_SB)
+
+ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
+geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
