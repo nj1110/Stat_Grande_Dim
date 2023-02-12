@@ -17,6 +17,9 @@ install.packages("factoextra")
 install.packages("VIM")
 install.packages("MultiVarSel")
 install.packages("DescTools")
+install.packages("parallel")
+install.packages("doMC")
+
 ```
 
 ```{r cars}
@@ -30,6 +33,8 @@ library(VIM)
 library(glmnet)
 library(MultiVarSel)
 library(DescTools)
+library(parallel)
+require(doMC)
 ```
 
 #### Importation des données 
@@ -71,7 +76,7 @@ str(df[1:10]) ## Type de colonnes
 #### Dispersion des variables 
 Informations descriptives 
 ```{r}
-#summary(df) 
+summary(df) 
 ```
 
 ### Anlayse des corrélations (variables quantitatives)
@@ -110,11 +115,84 @@ head(df1)
 heatmap(abs(cor(df1)), symm=TRUE)
 ```
 
+# test de normalité des variables 
+```{r}
+# Créer une fonction de test de normalité
+shapiro.test <- function(x) {
+  shapiro_test(x)
+}
+
+gauss_transform <- function(data) {
+  # Appliquer la transformation logarithmique
+  data <- log(data)
+  # Retourner les données transformées
+  return(data)
+}
+
+# Appliquer la fonction à un dataframe
+test_normalite <- function(dataframe) {
+  nbr_col <- 0
+  for (col in colnames(dataframe)) {
+    shapiro.test_result <- shapiro.test(dataframe[, col])
+    if (shapiro.test_result$p.value > 0.05) {
+      dataframe[, col] <- gauss_transform(dataframe[, col])
+      nbr_col <- nbr_col + 1
+    }
+  }
+  print(nbr_col)
+  return (dataframe)
+}
+
+# Appliquer la fonction à un dataframe
+Y <- test_normalite(Y)
+```
+## QUEL NOMBRE DE REPLICATIONS  CHOISIR 
+
+```{r}
+df_temp= df[df$treatment=="CD_0d", c(5,7:length(df))]
+rownames(df_temp) <- NULL
+
+X<- factor(as.character(df_temp[,1]))
+Y<- as.matrix(df_temp[,2:length(df_temp)])
+q = dim(Y)[2]  
+
+# Normaliation
+  Y<- scale(Y)
+  mat_temp <- model.matrix(lm(Y ~ X+ 0))
+  
+  ## Analyse des réisus et test du portemeanteau
+  residuals=lm(as.matrix(Y)~mat_temp-1)$residuals
+  pval_temp = whitening_test(residuals)
+  
+
+  result_blanchiement=whitening_choice(residuals,c("AR1","nonparam","ARMA"),pAR=1,qMA=0)
+  print(result_blanchiement) # selection du meilleur modèle pour repésenter la   dépendance des résidus 
+  
+
+  # Calcul estimateur de sigma 
+  square_root_inv_hat_Sigma=whitening(residuals,"nonparam",pAR=1,qMA=0)
+```
+
+```{r}
+# Selection des variables
+  library(parallel)
+  require(doMC)
+res = 0 
+liste = c(1:10)
+for (i in liste){
+  Frequencies=variable_selection(Y,mat_temp,square_root_inv_hat_Sigma,nb_repli=800,parallel=TRUE,nb.cores= 1)
+  res = append(res,sum(Frequencies[,3]>=0.95))
+  i = i+1 
+}
+ 
+```
+
+
 
 # AVEC BLANCHIEMENT 
 
 ```{r}
-Analyse_prot_stat = function(df,white_model,frequency)
+Analyse_prot_stat = function(df,white_model,nb_repli,name_output,facteur)
   {
   ## Variables 
   white_model = as.character(white_model)
@@ -123,6 +201,9 @@ Analyse_prot_stat = function(df,white_model,frequency)
   rownames(df) <- NULL
   X<- factor(as.character(df[,1]))
   Y<- as.matrix(df_temp[,2:length(df)])
+  q = dim(Y)[2]  
+  
+  # Normaliation
   Y<- scale(Y)
   mat_temp <- model.matrix(lm(Y~ X+ 0))
   
@@ -130,18 +211,36 @@ Analyse_prot_stat = function(df,white_model,frequency)
   residuals=lm(as.matrix(Y)~mat_temp-1)$residuals
   pval_temp = whitening_test(residuals)
   
-  sprintf("Test du Portemeanteau: pvalue = %s",round(pval_temp,2))
-  sprintf("Le nombre de lignes est %i et le nombre de colonnes %i",nrow(mat_temp),ncol(mat_temp))
-  sprintf("les dimensions de la matrice du modèle sont %i",dim(mat_temp)[2])
-  
+
   result_blanchiement=whitening_choice(residuals,c("AR1","nonparam","ARMA"),pAR=1,qMA=1)
   print(result_blanchiement) # selection du meilleur modèle pour repésenter la   dépendance des résidus 
   
+
+  ## Fonction  Anova séparée protéines par protéines
+  select_per_anova=c()
+  
+  for(i in 2:ncol(df))
+    {
+      res.anova<-lm(df[,i]  ~ df[,1] , data=df)
+      pvalue.anova=c()
+      pvalue.anova<-anova(res.anova)$'Pr(>F)'[1]
+        if(pvalue.anova<0.05/q){
+          select_per_anova=c(select_per_anova,colnames(df)[i])
+        }
+      }
+
+
   # Calcul estimateur de sigma 
   square_root_inv_hat_Sigma=whitening(residuals,white_model,pAR=1,qMA=0)
   
   # Selection des variables
-  Frequencies=variable_selection(Y,mat_temp,square_root_inv_hat_Sigma,nb_repli=100,parallel=FALSE)
+  library(parallel)
+  require(doMC)
+  Frequencies=variable_selection(Y,mat_temp,square_root_inv_hat_Sigma,nb_repli=nb_repli,parallel=TRUE,nb.cores = 1 )
+  
+  #save Frequencies 
+  
+  save(Freqs2, file= sprintf("%s.Rdata",name_output))
   
   # Liste intersection 
   Names_Frequency = data.frame(Frequencies)
@@ -158,27 +257,29 @@ Analyse_prot_stat = function(df,white_model,frequency)
   plot_blanch<-ggplot(data=Frequencies[Frequencies$frequency>=0.95,], aes(x=Names_of_Y,y=Names_of_X,color=frequency))+
     geom_tile(size=0.75)+
     scale_color_gradient2(midpoint=0.95,mid ='orange')+ 
-    theme_bw()+ylab('Levels of X')+xlab('m/z')
+    theme_bw()+ylab(sprintf("%s",facteur))+xlab('Code protéine')
 
-  boulier_blanch<-ggplot(data=Frequencies[Frequencies$frequency==frequency,], aes(x=Names_of_Y,y=Names_of_X,color=Names_of_X))+
-  geom_point(size=3)+theme_bw()+ylab('Levels of X')+xlab('m/z')
+  boulier_blanch<-ggplot(data=Frequencies[Frequencies$frequency == 1,], aes(x=Names_of_Y,y=Names_of_X,color=Names_of_X))+
+  geom_point(size=3)+theme_bw()+ylab('Levels of X')+xlab('Code protéine')
   boulier_blanch<-boulier_blanch + theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14),legend.position="bottom")
 
   
-  return(list(sprintf("Test du Portemeanteau: pvalue = %s",round(pval_temp,2)),sprintf("Le nombre de lignes est %i et le nombre de    colonnes %i",nrow(mat_temp),ncol(mat_temp)),sprintf("les dimensions de la matrice du modèle sont %i",dim(mat_temp)[2]),boulier_blanch,plot_blanch))
+  return(list(sprintf("Test du Portemeanteau: pvalue = %s",round(pval_temp,2)),sprintf("Le nombre de lignes est %i et le nombre de    colonnes %i",nrow(mat_temp),ncol(mat_temp)),sprintf("les dimensions de la matrice (q)* du modèle sont %i  ",dim(mat_temp)[2]), sprintf("Le nombre de varaibles sélectionnées par l'ANOVA à un facteur est %a",  length(select_per_anova)),boulier_blanch,plot_blanch))
+  
 }
 ```
 
 ### ANOVA 1 Facteur avec blanchiment: Temperature 
 ```{r}
 df_temp= df[df$treatment=="CD_0d", c(4,7:length(df))]
-Analyse_prot_stat(df_temp,"nonparam",1)
+# La fonction est : Analyse_prot_stat = function(df,white_model,frequency,nb_repli,name_output)
+Analyse_prot_stat(df_temp,"nonparam",600,"AB_temperature","Niveau Temperature")
 ```
 
 ### ANOVA 1 Facteur avec blanchiement :Imbibition 
 ```{r}
 df_imbib= df[df$treatment=="CD_0d", c(5,7:length(df))]
-Analyse_prot_stat(df_imbib,"AR1",1)
+Analyse_prot_stat(df_imbib,"nonparam",600,"AB_Imbition","Niveau Imbition")
 ```
 
 ### ANOVA 2 facteurs (températures et imbibition AVEC blanchiement et SANS interaction)
@@ -197,12 +298,10 @@ library(dplyr)
 df_2fac_sans_inter %>% select(temp_imb, everything()) -> df_2fac_sans_inter
 
 # Appliquer la meme fonction 
-Analyse_prot_stat(df_2fac_sans_inter,"nonparam",0.9)
+Analyse_prot_stat(df_2fac_sans_inter,"nonparam",600,"AB_Temp&Imbib_sans_interac","Niveu de température et d'imbibition")
 ```
 
 ### ANOVA 2 facteurs (températures et imbibition) AVEC blanchiement et AVEC interactions)
-
-
 ```{r}
 df_2fac_inter= df[df$treatment=="CD_0d", c(4,5,7:length(df))]
 rownames(df_2fac_inter) <- NULL
@@ -324,6 +423,7 @@ geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
 theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
 ```
+
 # Imbibition sans blanchiement 
 ```{r}
 df_imb= df[df$treatment=="CD_0d", c(5,7:length(df))]
@@ -358,21 +458,93 @@ Y__2fac_sans_interac_SB <- as.matrix(df_2fac_sans_inter[,2:length(df_2fac_sans_i
 Analyse_sans_blanchiement(df_2fac_sans_inter,X_2fac_sans_interac_SB,Y__2fac_sans_interac_SB, 50)
 ```
 
-######################################################################
-PB pour adapter 
+On extrait les 50 variables les plus significatives pour chaque résultat
+
+
 ```{r}
-#df_cd0 = df[df$treatment == 'CD_0d', -6]
-#df_cd0_1 = df_cd0[,6:length(df_cd0)]
-#prot<- rep(names(df_cd0_1), each = 3)
-prot<- rep(names(df_2fac_sans_inter[,-1]), each = 6)
-modalites_2fac_sans_interac_SB <- rep(c(df_2fac_sans_inter[,1]), times = 260)
-
-b_temp = cbind(as.data.frame(res.cum), prot, modalites_2fac_sans_interac_SB)
-b_temp = b[ind, ]
-table(b_temp$modalites_2fac_sans_interac_SB)
-
-ggplot(data=b_temp, aes(x=prot,y=modalites_temp,color=modalites_temp))+
-geom_point(size=1)+theme_bw()+ylab('Levels of X')+xlab('m/z')+
-theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+intersect(table_name[,5], table_name[,4])
 ```
 
+#### OBSERVER INTERSECTIONS 
+```{r}
+load('Temperature_blanchi_2022.Rdata')
+```
+
+```{r}
+colnames(Freqs2)<-c('Names_of_Y','Names_of_X','frequency') 
+plot(sort(Freqs2$frequency,decreasing = T),type='s')
+```
+----------------------------------------------------------------------------------------------------------------------------------
+
+# Comparaison des résultats sélectionnés
+
+
+```{r}
+Insert_selected_variable <- function(dataframe, name, path_to_file) {
+  load(path_to_file)
+  seuil <- sort(Freqs2$frequency,decreasing = T)[150]
+  var = Freqs2$Names_of_Y[Freqs2$frequency>=1]
+  dataframe[name] = var[1:150]
+  return(dataframe)
+}
+
+```
+
+On extrait les **150** variables les plus significatives pour chaque résultat à **951%**
+
+```{r}
+table_name <- data.frame (matrix(nrow = 150, ncol = 0))
+table_name <- Insert_selected_variable(table_name, 'Imbibition_AB',  'AB_Imbition.Rdata')
+table_name <- Insert_selected_variable(table_name, 'Temperature_AB', 'AB_temperature.Rdata')
+table_name <- Insert_selected_variable(table_name, 'Temp&Imbib_AB', 'AB_Temp&Imbib_sans_interac.Rdata')
+```
+
+
+```{r}
+length(intersect(table_name[,1], table_name[,2]))
+```
+----------------------------------------------------------------------------------------------------------------------------------
+### PLot Résultats
+```{r}
+
+#install.packages("VennDiagram")
+
+# move to new plotting page
+grid.newpage()
+
+n12 = length(intersect(table_name[,1], table_name[,2]))
+n13 = length(intersect(table_name[,1], table_name[,3]))
+n23 = length(intersect(table_name[,2], table_name[,3]))
+n123 = length(intersect((intersect(table_name[,1], table_name[,2])),table_name[,3]))
+              
+# move to new plotting page
+grid.newpage()
+draw.pairwise.venn(area1=88, area2=88,cross.area=n12,
+                   category=c("Imbibition","Temperature"),fill=c("Green","Blue"))
+
+
+#########""
+grid.newpage()
+draw.triple.venn(area1=88, area2=88, area3=88, 
+                 n12=57, n23=57, n13=57, n123=57, 
+                 category=c("Low","Medium","Hight"),
+                 col="Red",fill=c("Green","Yellow","Blue"))
+```
+------------------------------------
+
+# RESULTATS BLANCHIMENT - NOEMIE 
+```{r}
+grid.newpage()
+
+n12 = length(intersect(table_name[,1], table_name[,2]))
+n13 = length(intersect(table_name[,1], table_name[,3]))
+n23 = length(intersect(table_name[,2], table_name[,3]))
+n123 = length(intersect((intersect(table_name[,1], table_name[,2])),table_name[,3]))
+
+#########
+grid.newpage()
+draw.triple.venn(area1=88, area2=88, area3=88, 
+                 n12=57, n23=57, n13=57, n123=57, 
+                 category=c("Low","Medium","Hight"),
+                 col="Red",fill=c("Green","Yellow","Blue"))
+```
